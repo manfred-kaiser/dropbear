@@ -102,6 +102,9 @@ void cli_connected(int result, int sock, void* userdata, const char *errstring)
 		dropbear_exit("Connect failed: %s", errstring);
 	}
 	myses->sock_in = myses->sock_out = sock;
+	TRACE(("cli_connected"))
+	ses.socket_prio = DROPBEAR_PRIO_NORMAL;
+	/* switches to lowdelay */
 	update_channel_prio();
 }
 
@@ -246,6 +249,9 @@ static void cli_sessionloop() {
 			/* We've got the transport layer sorted, we now need to request
 			 * userauth */
 			send_msg_service_request(SSH_SERVICE_USERAUTH);
+			/* We aren't using any "implicit server authentication" methods,
+			so don't need to wait for a response for SSH_SERVICE_USERAUTH
+			before sending the auth messages (rfc4253 10) */
 			cli_auth_getmethods();
 			cli_ses.state = USERAUTH_REQ_SENT;
 			TRACE(("leave cli_sessionloop: sent userauth methods req"))

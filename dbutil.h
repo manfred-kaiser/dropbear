@@ -90,11 +90,21 @@ char * expand_homedir_path(const char *inpath);
 
 void fsync_parent_dir(const char* fn);
 
+int fd_read_pending(int fd);
+
 #if DROPBEAR_MSAN
 /* FD_ZERO seems to leave some memory uninitialized. clear it to avoid false positives */
 #define DROPBEAR_FD_ZERO(fds) do { memset((fds), 0x0, sizeof(fd_set)); FD_ZERO(fds); } while(0)
 #else
 #define DROPBEAR_FD_ZERO(fds) FD_ZERO(fds)
 #endif
+
+/* dropbearmulti entry points */
+int dropbear_main(int argc, char ** argv, const char * multipath);
+int cli_main(int argc, char ** argv);
+int dropbearkey_main(int argc, char ** argv);
+int dropbearconvert_main(int argc, char ** argv);
+int scp_main(int argc, char ** argv);
+
 
 #endif /* DROPBEAR_DBUTIL_H_ */

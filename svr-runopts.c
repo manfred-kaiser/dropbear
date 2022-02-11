@@ -100,7 +100,7 @@ static void printhelp(const char * progname) {
 #if INETD_MODE
 					"-i		Start for inetd\n"
 #endif
-					"-W <receive_window_buffer> (default %d, larger may be faster, max 1MB)\n"
+					"-W <receive_window_buffer> (default %d, larger may be faster, max 10MB)\n"
 					"-K <keepalive>  (0 is never, default %d, in seconds)\n"
 					"-I <idle_timeout>  (0 is never, default %d, in seconds)\n"
 #if DROPBEAR_PLUGIN
@@ -247,6 +247,12 @@ void svr_getopts(int argc, char ** argv) {
 					svr_opts.inetdmode = 1;
 					break;
 #endif
+#if DROPBEAR_DO_REEXEC && NON_INETD_MODE
+				/* For internal use by re-exec */
+				case '2':
+					svr_opts.reexec_child = 1;
+					break;
+#endif
 				case 'p':
 				  nextisport = 1;
 				  break;
@@ -385,12 +391,9 @@ void svr_getopts(int argc, char ** argv) {
 		}
 	}
 #endif
-	
+
 	if (recv_window_arg) {
-		opts.recv_window = atol(recv_window_arg);
-		if (opts.recv_window == 0 || opts.recv_window > MAX_RECV_WINDOW) {
-			dropbear_exit("Bad recv window '%s'", recv_window_arg);
-		}
+		parse_recv_window(recv_window_arg);
 	}
 
 	if (maxauthtries_arg) {
@@ -402,7 +405,7 @@ void svr_getopts(int argc, char ** argv) {
 		svr_opts.maxauthtries = val;
 	}
 
-	
+
 	if (keepalive_arg) {
 		unsigned int val;
 		if (m_str_to_uint(keepalive_arg, &val) == DROPBEAR_FAILURE) {
@@ -422,6 +425,19 @@ void svr_getopts(int argc, char ** argv) {
 	if (svr_opts.forced_command) {
 		dropbear_log(LOG_INFO, "Forced command set to '%s'", svr_opts.forced_command);
 	}
+
+#if INETD_MODE
+	if (svr_opts.inetdmode && (
+		opts.usingsyslog == 0
+#if DEBUG_TRACE
+		|| debug_trace
+#endif
+		)) {
+		/* log output goes to stderr which would get sent over the inetd network socket */
+		dropbear_exit("Dropbear inetd mode is incompatible with debug -v or non-syslog");
+	}
+#endif
+
 #if DROPBEAR_PLUGIN
         if (pubkey_plugin) {
             char *args = strchr(pubkey_plugin, ',');

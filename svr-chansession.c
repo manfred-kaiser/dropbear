@@ -54,7 +54,7 @@ static void closechansess(const struct Channel *channel);
 static void cleanupchansess(const struct Channel *channel);
 static int newchansess(struct Channel *channel);
 static void chansessionrequest(struct Channel *channel);
-static int sesscheckclose(const struct Channel *channel);
+static int sesscheckclose(struct Channel *channel);
 
 static void send_exitsignalstatus(const struct Channel *channel);
 static void send_msg_chansess_exitstatus(const struct Channel * channel,
@@ -64,7 +64,6 @@ static void send_msg_chansess_exitsignal(const struct Channel * channel,
 static void get_termmodes(const struct ChanSess *chansess);
 
 const struct ChanType svrchansess = {
-	0, /* sepfds */
 	"session", /* name */
 	newchansess, /* inithandler */
 	sesscheckclose, /* checkclosehandler */
@@ -73,15 +72,26 @@ const struct ChanType svrchansess = {
 	cleanupchansess /* cleanup */
 };
 
-/* required to clear environment */
-extern char** environ;
-
-static int sesscheckclose(const struct Channel *channel) {
+/* Returns whether the channel is ready to close. The child process
+   must not be running (has never started, or has exited) */
+static int sesscheckclose(struct Channel *channel) {
 	struct ChanSess *chansess = (struct ChanSess*)channel->typedata;
-	TRACE(("sesscheckclose, pid is %d", chansess->exit.exitpid))
-	return chansess->exit.exitpid != -1;
+	TRACE(("sesscheckclose, pid %d, exitpid %d", chansess->pid, chansess->exit.exitpid))
+
+	if (chansess->exit.exitpid != -1) {
+		channel->flushing = 1;
+	}
+	return chansess->pid == 0 || chansess->exit.exitpid != -1;
 }
 
+/* Handler for childs exiting, store the state for return to the client */
+
+/* There's a particular race we have to watch out for: if the forked child
+ * executes, exits, and this signal-handler is called, all before the parent
+ * gets to run, then the childpids[] array won't have the pid in it. Hence we
+ * use the svr_ses.lastexit struct to hold the exit, which is then compared by
+ * the parent when it runs. This work correctly at least in the case of a
+ * single shell spawned (ie the usual case) */
 void svr_chansess_checksignal(void) {
 	int status;
 	pid_t pid;
@@ -127,18 +137,9 @@ void svr_chansess_checksignal(void) {
 			/* we use this to determine how pid exited */
 			ex->exitsignal = -1;
 		}
-		
 	}
 }
 
-/* Handler for childs exiting, store the state for return to the client */
-
-/* There's a particular race we have to watch out for: if the forked child
- * executes, exits, and this signal-handler is called, all before the parent
- * gets to run, then the childpids[] array won't have the pid in it. Hence we
- * use the svr_ses.lastexit struct to hold the exit, which is then compared by
- * the parent when it runs. This work correctly at least in the case of a
- * single shell spawned (ie the usual case) */
 static void sesssigchild_handler(int UNUSED(dummy)) {
 	struct sigaction sa_chld;
 
@@ -273,7 +274,8 @@ static int newchansess(struct Channel *channel) {
 	chansess->agentdir = NULL;
 #endif
 
-	channel->prio = DROPBEAR_CHANNEL_PRIO_INTERACTIVE;
+	/* Will drop to DROPBEAR_PRIO_NORMAL if a non-tty command starts */
+	channel->prio = DROPBEAR_PRIO_LOWDELAY;
 
 	return 0;
 
@@ -730,7 +732,7 @@ static int sessioncommand(struct Channel *channel, struct ChanSess *chansess,
 		/* no pty */
 		ret = noptycommand(channel, chansess);
 		if (ret == DROPBEAR_SUCCESS) {
-			channel->prio = DROPBEAR_CHANNEL_PRIO_BULK;
+			channel->prio = DROPBEAR_PRIO_NORMAL;
 			update_channel_prio();
 		}
 	} else {
@@ -768,6 +770,7 @@ static int noptycommand(struct Channel *channel, struct ChanSess *chansess) {
 	ses.maxfd = MAX(ses.maxfd, channel->writefd);
 	ses.maxfd = MAX(ses.maxfd, channel->readfd);
 	ses.maxfd = MAX(ses.maxfd, channel->errfd);
+	channel->bidir_fd = 0;
 
 	addchildpid(chansess, chansess->pid);
 
@@ -836,19 +839,26 @@ static int ptycommand(struct Channel *channel, struct ChanSess *chansess) {
 		pty_make_controlling_tty(&chansess->slave, chansess->tty);
 		
 		if ((dup2(chansess->slave, STDIN_FILENO) < 0) ||
-			(dup2(chansess->slave, STDERR_FILENO) < 0) ||
 			(dup2(chansess->slave, STDOUT_FILENO) < 0)) {
 			TRACE(("leave ptycommand: error redirecting filedesc"))
 			return DROPBEAR_FAILURE;
 			}
 
-		close(chansess->slave);
-
 		/* write the utmp/wtmp login record - must be after changing the
-		 * terminal used for stdout with the dup2 above */
+		 * terminal used for stdout with the dup2 above, otherwise
+		 * the wtmp login will not be recorded */
 		li = chansess_login_alloc(chansess);
 		login_login(li);
 		login_free_entry(li);
+
+		/* Can now dup2 stderr. Messages from login_login() have gone
+		to the parent stderr */
+		if (dup2(chansess->slave, STDERR_FILENO) < 0) {
+			TRACE(("leave ptycommand: error redirecting filedesc"))
+			return DROPBEAR_FAILURE;
+		}
+
+		close(chansess->slave);
 
 #if DO_MOTD
 		if (svr_opts.domotd && !chansess->cmd) {
@@ -894,6 +904,7 @@ static int ptycommand(struct Channel *channel, struct ChanSess *chansess) {
 		channel->readfd = chansess->master;
 		/* don't need to set stderr here */
 		ses.maxfd = MAX(ses.maxfd, chansess->master);
+		channel->bidir_fd = 1;
 
 		setnonblocking(chansess->master);
 

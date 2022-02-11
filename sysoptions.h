@@ -29,6 +29,13 @@
 	#error "NON_INETD_MODE or INETD_MODE (or both) must be enabled."
 #endif
 
+/* Would probably work on freebsd but hasn't been tested */
+#if defined(HAVE_FEXECVE) && DROPBEAR_REEXEC && defined(__linux__)
+#define DROPBEAR_DO_REEXEC 1
+#else
+#define DROPBEAR_DO_REEXEC 0
+#endif
+
 /* A client should try and send an initial key exchange packet guessing
  * the algorithm that will match - saves a round trip connecting, has little
  * overhead if the guess was "wrong". */
@@ -50,7 +57,7 @@
 #define MIN_RSA_KEYLEN 1024
 #endif
 
-#define MAX_BANNER_SIZE 2000 /* this is 25*80 chars, any more is foolish */
+#define MAX_BANNER_SIZE 2050 /* this is 25*80 chars, any more is foolish */
 #define MAX_BANNER_LINES 20 /* How many lines the client will display */
 
 /* the number of NAME=VALUE pairs to malloc for environ, if we don't have
@@ -86,9 +93,16 @@
 /* Required for pubkey auth */
 #define DROPBEAR_SIGNKEY_VERIFY ((DROPBEAR_SVR_PUBKEY_AUTH) || (DROPBEAR_CLIENT))
 
+/* crypt(password) must take less time than the auth failure delay
+   (250ms set in svr-auth.c). On Linux the delay depends on
+   password length, 100 characters here was empirically derived.
+
+   If a longer password is allowed Dropbear cannot compensate
+   for the crypt time which will expose which usernames exist */
 #define DROPBEAR_MAX_PASSWORD_LEN 100
 
 #define SHA1_HASH_SIZE 20
+#define SHA256_HASH_SIZE 32
 #define MD5_HASH_SIZE 16
 #define MAX_HASH_SIZE 64 /* sha512 */
 
@@ -190,7 +204,7 @@ If you test it please contact the Dropbear author */
 
 #define RECV_WINDOWEXTEND (opts.recv_window / 3) /* We send a "window extend" every
 								RECV_WINDOWEXTEND bytes */
-#define MAX_RECV_WINDOW (1024*1024) /* 1 MB should be enough */
+#define MAX_RECV_WINDOW (10*1024*1024) /* 10 MB should be enough */
 
 #define MAX_CHANNELS 1000 /* simple mem restriction, includes each tcp/x11
 							connection, so can't be _too_ small */

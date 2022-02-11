@@ -35,8 +35,8 @@ COMMONOBJS=dbutil.o buffer.o dbhelpers.o \
 		signkey.o rsa.o dbrandom.o \
 		queue.o \
 		atomicio.o compat.o fake-rfc2553.o \
-		ltc_prng.o ecc.o ecdsa.o crypto_desc.o \
-		curve25519.o ed25519.o \
+		ltc_prng.o ecc.o ecdsa.o sk-ecdsa.o crypto_desc.o \
+		curve25519.o ed25519.o sk-ed25519.o \
 		dbmalloc.o \
 		gensignkey.o gendss.o genrsa.o gened25519.o
 
@@ -236,7 +236,7 @@ $(STATIC_LTC): $(OPTION_HEADERS)
 $(STATIC_LTM): $(OPTION_HEADERS)
 	$(MAKE) -C libtommath
 
-.PHONY : clean sizes thisclean distclean tidy ltc-clean ltm-clean lint
+.PHONY : clean sizes thisclean distclean tidy ltc-clean ltm-clean lint check
 
 ltc-clean:
 	$(MAKE) -C libtomcrypt clean
@@ -264,6 +264,9 @@ tidy:
 
 lint:
 	cd $(srcdir); ./dropbear_lint.sh
+
+check: lint
+	make -C test
 
 ## Fuzzing targets
 

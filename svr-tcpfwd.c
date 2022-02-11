@@ -59,9 +59,8 @@ static int newtcpdirect(struct Channel * channel);
 
 #if DROPBEAR_SVR_REMOTETCPFWD
 static const struct ChanType svr_chan_tcpremote = {
-	1, /* sepfds */
 	"forwarded-tcpip",
-	tcp_prio_inithandler,
+	NULL,
 	NULL,
 	NULL,
 	NULL,
@@ -241,7 +240,6 @@ out:
 #if DROPBEAR_SVR_LOCALTCPFWD
 
 const struct ChanType svr_chan_tcpdirect = {
-	1, /* sepfds */
 	"direct-tcpip",
 	newtcpdirect, /* init */
 	NULL, /* checkclose */
@@ -291,11 +289,10 @@ static int newtcpdirect(struct Channel * channel) {
 		goto out;
 	}
 
-	channel->prio = DROPBEAR_CHANNEL_PRIO_UNKNOWABLE;
-
 	snprintf(portstring, sizeof(portstring), "%u", destport);
-	channel->conn_pending = connect_remote(desthost, portstring, channel_connect_done, channel, NULL, NULL);
-	
+	channel->conn_pending = connect_remote(desthost, portstring, channel_connect_done,
+		channel, NULL, NULL, DROPBEAR_PRIO_NORMAL);
+
 	err = SSH_OPEN_IN_PROGRESS;
 
 out:

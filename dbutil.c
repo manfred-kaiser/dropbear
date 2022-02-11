@@ -583,8 +583,15 @@ void disallow_core() {
 /* Returns DROPBEAR_SUCCESS or DROPBEAR_FAILURE, with the result in *val */
 int m_str_to_uint(const char* str, unsigned int *val) {
 	unsigned long l;
-	errno = 0;
-	l = strtoul(str, NULL, 10);
+	char *endp;
+
+	l = strtoul(str, &endp, 10);
+
+	if (endp == str || *endp != '\0') {
+		// parse error
+		return DROPBEAR_FAILURE;
+	}
+
 	/* The c99 spec doesn't actually seem to define EINVAL, but most platforms
 	 * I've looked at mention it in their manpage */
 	if ((l == 0 && errno == EINVAL)
@@ -602,11 +609,19 @@ otherwise home directory is prepended */
 char * expand_homedir_path(const char *inpath) {
 	struct passwd *pw = NULL;
 	if (inpath[0] != '/') {
-		pw = getpwuid(getuid());
-		if (pw && pw->pw_dir) {
-			int len = strlen(inpath) + strlen(pw->pw_dir) + 2;
+		char *homedir = getenv("HOME");
+
+		if (!homedir) {
+			pw = getpwuid(getuid());
+			if (pw) {
+				homedir = pw->pw_dir;
+			}
+		}
+
+		if (homedir) {
+			int len = strlen(inpath) + strlen(homedir) + 2;
 			char *buf = m_malloc(len);
-			snprintf(buf, len, "%s/%s", pw->pw_dir, inpath);
+			snprintf(buf, len, "%s/%s", homedir, inpath);
 			return buf;
 		}
 	}
@@ -707,4 +722,23 @@ void fsync_parent_dir(const char* fn) {
 
 	m_free(fn_dir);
 #endif
+}
+
+int fd_read_pending(int fd) {
+	fd_set fds;
+	struct timeval timeout;
+
+	DROPBEAR_FD_ZERO(&fds);
+	FD_SET(fd, &fds);
+	while (1) {
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 0;
+		if (select(fd+1, &fds, NULL, NULL, &timeout) < 0) {
+			if (errno == EINTR) {
+				continue;
+			}
+			return 0;
+		}
+		return FD_ISSET(fd, &fds);
+	}
 }

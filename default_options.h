@@ -37,7 +37,14 @@ IMPORTANT: Some options will require "make clean" after changes */
 #define NON_INETD_MODE 1
 #define INETD_MODE 1
 
-/* Include verbose debug output, enabled with -v at runtime. 
+/* By default Dropbear will re-execute itself for each incoming connection so
+   that memory layout may be re-randomised (ASLR) - exploiting
+   vulnerabilities becomes harder. Re-exec causes slightly more memory use
+   per connection.
+   This option is ignored on non-Linux platforms at present */
+#define DROPBEAR_REEXEC 1
+
+/* Include verbose debug output, enabled with -v at runtime.
  * This will add a reasonable amount to your executable size. */
 #define DEBUG_TRACE 0
 
@@ -126,9 +133,11 @@ IMPORTANT: Some options will require "make clean" after changes */
  * code (either ECDSA or ECDH) increases binary size - around 30kB
  * on x86-64 */
 #define DROPBEAR_ECDSA 1
+#define DROPBEAR_SK_ECDSA 1
 /* Ed25519 is faster than ECDSA. Compiling in Ed25519 code increases
    binary size - around 7,5kB on x86-64 */
 #define DROPBEAR_ED25519 1
+#define DROPBEAR_SK_ED25519 1
 
 /* RSA must be >=1024 */
 #define DROPBEAR_DEFAULT_RSA_SIZE 2048
