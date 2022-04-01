@@ -1,4 +1,5 @@
 # Can be used locally with https://github.com/nektos/act
+# Note the XXX line below.
 
 name: BuildTest
 on:
@@ -11,6 +12,9 @@ jobs:
     runs-on: ${{ matrix.os || 'ubuntu-20.04' }}
     strategy:
       matrix:
+        # XXX uncomment the line below to work with act, see https://github.com/nektos/act/issues/996
+        # name: []
+
         # Rather than a boolean False we use eg
         #   runcheck: 'no'
         # Otherwise GH expressions will make a None var
@@ -40,6 +44,12 @@ jobs:
           - name: linux clang
             cc: clang
 
+          # Some platforms only have old compilers, we try to keep
+          # compatibilty. For some reason -std=c89 doesn't enforce
+          # early declarations so we specify it anyway.
+          - name: c89
+            extracflags: -std=c89 -Wdeclaration-after-statement
+
           - name: macos 10.15
             os: macos-10.15
             cc: clang
@@ -59,12 +69,19 @@ jobs:
             apt: 'no'
             ranlib: ranlib -no_warning_for_no_symbols
 
+          # Check that debug code doesn't bitrot
+          - name: DEBUG_TRACE
+            localoptions: |
+              #define DEBUG_TRACE 5
+
           # # Fuzzers run standalone. A bit superfluous with cifuzz, but
           # # good to run the whole corpus to keep it working.
           # - name: fuzzing with address sanitizer
           #   configure_flags: --enable-fuzz --disable-harden --enable-bundled-libtom --enable-werror
           #   ldflags: -fsanitize=address
           #   extracflags: -fsanitize=address
+          #   # -fsanitize=address prevents aslr, don't test it
+          #   pytest_addopts: -k "not aslr"
           #   fuzz: True
           #   cc: clang
 
@@ -74,6 +91,7 @@ jobs:
           #   ldflags: -fsanitize=undefined
           #   # don't fail with alignment due to https://github.com/libtom/libtomcrypt/issues/549
           #   extracflags: -fsanitize=undefined -fno-sanitize-recover=undefined -fsanitize-recover=alignment
+          #   pytest_addopts: -k "not aslr"
           #   fuzz: True
           #   cc: clang
 
@@ -86,6 +104,11 @@ jobs:
       # for fuzzing
       CXX: clang++
       RANLIB: ${{ matrix.ranlib || 'ranlib' }}
+      # pytest in "make check" recognises this for extra arguments
+      PYTEST_ADDOPTS: ${{ matrix.pytest_addopts }}
+      # some pytests depend on special setup from this file. see authorized_keys below.
+      DBTEST_IN_ACTION: true
+      LOCALOPTIONS: ${{ matrix.localoptions }}
 
     steps:
       - name: deps
@@ -103,6 +126,11 @@ jobs:
         if: ${{ matrix.nowritev }}
         run: sed -i -e s/HAVE_WRITEV/DONT_HAVE_WRITEV/ config.h
 
+      - name: localoptions
+        run: |
+          echo "$LOCALOPTIONS" > localoptions.h
+          cat localoptions.h
+
       - name: make
         run: make -j3
 
@@ -116,6 +144,7 @@ jobs:
           cp .github/multiwrapper dropbear
           cp .github/multiwrapper dbclient
           cp .github/multiwrapper dropbearkey
+          cp .github/multiwrapper dropbearconvert
 
       - name: makefuzz
         run: make fuzzstandalone
@@ -128,7 +157,14 @@ jobs:
       - name: keys
         run: |
           mkdir -p ~/.ssh
+          # remove old files so we can rerun in-place with "act -r" during test development
+          rm -vf ~/.ssh/id_dropbear*
           ~/inst/bin/dropbearkey -t ecdsa -f ~/.ssh/id_dropbear | grep ^ecdsa > ~/.ssh/authorized_keys
+
+          # to test setting SSH_PUBKEYINFO, replace the trailing comment
+          ~/inst/bin/dropbearkey -t ecdsa -f ~/.ssh/id_dropbear_key2 | grep ^ecdsa | sed 's/[^ ]*$/key2 extra/' >> ~/.ssh/authorized_keys
+          ~/inst/bin/dropbearkey -t ecdsa -f ~/.ssh/id_dropbear_key3 | grep ^ecdsa | sed 's/[^ ]*$/key3%char/' >> ~/.ssh/authorized_keys
+          ~/inst/bin/dropbearkey -t ecdsa -f ~/.ssh/id_dropbear_key4 | grep ^ecdsa | sed 's/[^ ]*$/key4,char/' >> ~/.ssh/authorized_keys
           chmod 700 ~ ~/.ssh ~/.ssh/authorized_keys
           ls -ld ~ ~/.ssh ~/.ssh/authorized_keys
 

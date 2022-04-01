@@ -47,8 +47,11 @@ void dropbear_log(int priority, const char* format, ...) ATTRIB_PRINTF(2,3) ;
 void fail_assert(const char* expr, const char* file, int line) ATTRIB_NORETURN;
 
 #if DEBUG_TRACE
-void dropbear_trace(const char* format, ...) ATTRIB_PRINTF(1,2);
+void dropbear_trace1(const char* format, ...) ATTRIB_PRINTF(1,2);
 void dropbear_trace2(const char* format, ...) ATTRIB_PRINTF(1,2);
+void dropbear_trace3(const char* format, ...) ATTRIB_PRINTF(1,2);
+void dropbear_trace4(const char* format, ...) ATTRIB_PRINTF(1,2);
+void dropbear_trace5(const char* format, ...) ATTRIB_PRINTF(1,2);
 void printhex(const char * label, const unsigned char * buf, int len);
 void printmpint(const char *label, mp_int *mp);
 void debug_start_net(void);
@@ -70,6 +73,8 @@ void m_close(int fd);
 void setnonblocking(int fd);
 void disallow_core(void);
 int m_str_to_uint(const char* str, unsigned int *val);
+/* The same as snprintf() but exits rather than returning negative */
+int m_snprintf(char *str, size_t size, const char *format, ...);
 
 /* Used to force mp_ints to be initialised */
 #define DEF_MP_INT(X) mp_int X = {0, 0, 0, NULL}

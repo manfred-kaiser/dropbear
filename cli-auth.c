@@ -82,6 +82,11 @@ void recv_msg_userauth_banner() {
 		return;
 	}
 
+	if (cli_opts.quiet) {
+		TRACE(("not showing banner"))
+		return;
+	}
+
 	banner = buf_getstring(ses.payload, &bannerlen);
 	buf_eatstring(ses.payload); /* The language string */
 
@@ -260,7 +265,7 @@ void recv_msg_userauth_success() {
 	/* This function can validly get called multiple times
 	if DROPBEAR_CLI_IMMEDIATE_AUTH is set */
 
-	TRACE(("received msg_userauth_success"))
+	DEBUG1(("received msg_userauth_success"))
 	if (cli_opts.disable_trivial_auth && cli_ses.is_trivial_auth) {
 		dropbear_exit("trivial authentication not allowed");
 	}

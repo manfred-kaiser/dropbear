@@ -109,7 +109,7 @@ static void printhelp(const char * progname) {
 #endif
 					"-V    Version\n"
 #if DEBUG_TRACE
-					"-v		verbose (compiled with DEBUG_TRACE)\n"
+					"-v    verbose (repeat for more verbose)\n"
 #endif
 					,DROPBEAR_VERSION, progname,
 #if DROPBEAR_DSS
@@ -163,7 +163,7 @@ void svr_getopts(int argc, char ** argv) {
 	svr_opts.portcount = 0;
 	svr_opts.hostkey = NULL;
 	svr_opts.delay_hostkey = 0;
-	svr_opts.pidfile = DROPBEAR_PIDFILE;
+	svr_opts.pidfile = expand_homedir_path(DROPBEAR_PIDFILE);
 #if DROPBEAR_SVR_LOCALTCPFWD
 	svr_opts.nolocaltcp = 0;
 #endif
@@ -310,7 +310,7 @@ void svr_getopts(int argc, char ** argv) {
 #endif
 #if DEBUG_TRACE
 				case 'v':
-					debug_trace = 1;
+					debug_trace++;
 					break;
 #endif
 				case 'V':
@@ -452,56 +452,34 @@ void svr_getopts(int argc, char ** argv) {
 }
 
 static void addportandaddress(const char* spec) {
-	char *spec_copy = NULL, *myspec = NULL, *port = NULL, *address = NULL;
+	char *port = NULL, *address = NULL;
 
-	if (svr_opts.portcount < DROPBEAR_MAX_PORTS) {
-
-		/* We don't free it, it becomes part of the runopt state */
-		spec_copy = m_strdup(spec);
-		myspec = spec_copy;
-
-		if (myspec[0] == '[') {
-			myspec++;
-			port = strchr(myspec, ']');
-			if (!port) {
-				/* Unmatched [ -> exit */
-				dropbear_exit("Bad listen address");
-			}
-			port[0] = '\0';
-			port++;
-			if (port[0] != ':') {
-				/* Missing port -> exit */
-				dropbear_exit("Missing port");
-			}
-		} else {
-			/* search for ':', that separates address and port */
-			port = strrchr(myspec, ':');
-		}
-
-		if (!port) {
-			/* no ':' -> the whole string specifies just a port */
-			port = myspec;
-		} else {
-			/* Split the address/port */
-			port[0] = '\0'; 
-			port++;
-			address = myspec;
-		}
-
-		if (!address) {
-			/* no address given -> fill in the default address */
-			address = DROPBEAR_DEFADDRESS;
-		}
-
-		if (port[0] == '\0') {
-			/* empty port -> exit */
-			dropbear_exit("Bad port");
-		}
-		svr_opts.ports[svr_opts.portcount] = m_strdup(port);
-		svr_opts.addresses[svr_opts.portcount] = m_strdup(address);
-		svr_opts.portcount++;
-		m_free(spec_copy);
+	if (svr_opts.portcount >= DROPBEAR_MAX_PORTS) {
+		return;
 	}
+
+	if (split_address_port(spec, &address, &port) == DROPBEAR_FAILURE) {
+		dropbear_exit("Bad -p argument");
+	}
+
+	/* A bare port */
+	if (!port) {
+		port = address;
+		address = NULL;
+	}
+
+	if (!address) {
+		/* no address given -> fill in the default address */
+		address = m_strdup(DROPBEAR_DEFADDRESS);
+	}
+
+	if (port[0] == '\0') {
+		/* empty port -> exit */
+		dropbear_exit("Bad port");
+	}
+	svr_opts.ports[svr_opts.portcount] = port;
+	svr_opts.addresses[svr_opts.portcount] = address;
+	svr_opts.portcount++;
 }
 
 static void disablekey(int type) {
@@ -530,12 +508,14 @@ static void loadhostkey_helper(const char *name, void** src, void** dst, int fat
 /* Must be called after syslog/etc is working */
 static void loadhostkey(const char *keyfile, int fatal_duplicate) {
 	sign_key * read_key = new_sign_key();
+	char *expand_path = expand_homedir_path(keyfile);
 	enum signkey_type type = DROPBEAR_SIGNKEY_ANY;
-	if (readhostkey(keyfile, read_key, &type) == DROPBEAR_FAILURE) {
+	if (readhostkey(expand_path, read_key, &type) == DROPBEAR_FAILURE) {
 		if (!svr_opts.delay_hostkey) {
-			dropbear_log(LOG_WARNING, "Failed loading %s", keyfile);
+			dropbear_log(LOG_WARNING, "Failed loading %s", expand_path);
 		}
 	}
+	m_free(expand_path);
 
 #if DROPBEAR_RSA
 	if (type == DROPBEAR_SIGNKEY_RSA) {
@@ -686,6 +666,12 @@ void load_all_hostkeys() {
 	} else {
 		any_keys = 1;
 	}
+#endif
+#if DROPBEAR_SK_ECDSA
+	disablekey(DROPBEAR_SIGNKEY_SK_ECDSA_NISTP256);
+#endif 
+#if DROPBEAR_SK_ED25519
+	disablekey(DROPBEAR_SIGNKEY_SK_ED25519);
 #endif
 
 	if (!any_keys) {

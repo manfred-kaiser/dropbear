@@ -155,7 +155,7 @@ void dropbear_log(int priority, const char* format, ...) {
 }
 
 
-#if DEBUG_TRACE
+#if DEBUG_TRACE 
 
 static double debug_start_time = -1;
 
@@ -185,39 +185,63 @@ static double time_since_start()
 	return nowf - debug_start_time;
 }
 
-void dropbear_trace(const char* format, ...) {
-	va_list param;
-
-	if (!debug_trace) {
+static void dropbear_tracelevel(int level, const char *format, va_list param)
+{
+	if (debug_trace == 0 || debug_trace < level) {
 		return;
 	}
 
-	va_start(param, format);
-	fprintf(stderr, "TRACE  (%d) %f: ", getpid(), time_since_start());
+	fprintf(stderr, "TRACE%d (%d) %f: ", level, getpid(), time_since_start());
 	vfprintf(stderr, format, param);
 	fprintf(stderr, "\n");
+}
+#if (DEBUG_TRACE>=1)
+void dropbear_trace1(const char* format, ...) {
+	va_list param;
+
+	va_start(param, format);
+	dropbear_tracelevel(1, format, param);
 	va_end(param);
 }
-
+#endif
+#if (DEBUG_TRACE>=2)
 void dropbear_trace2(const char* format, ...) {
-	static int trace_env = -1;
 	va_list param;
 
-	if (trace_env == -1) {
-		trace_env = getenv("DROPBEAR_TRACE2") ? 1 : 0;
-	}
-
-	if (!(debug_trace && trace_env)) {
-		return;
-	}
-
 	va_start(param, format);
-	fprintf(stderr, "TRACE2 (%d) %f: ", getpid(), time_since_start());
-	vfprintf(stderr, format, param);
-	fprintf(stderr, "\n");
+	dropbear_tracelevel(2, format, param);
 	va_end(param);
 }
-#endif /* DEBUG_TRACE */
+#endif
+#if (DEBUG_TRACE>=3)
+void dropbear_trace3(const char* format, ...) {
+	va_list param;
+
+	va_start(param, format);
+	dropbear_tracelevel(3, format, param);
+	va_end(param);
+}
+#endif
+#if (DEBUG_TRACE>=4)
+void dropbear_trace4(const char* format, ...) {
+	va_list param;
+
+	va_start(param, format);
+	dropbear_tracelevel(4, format, param);
+	va_end(param);
+}
+#endif
+#if (DEBUG_TRACE>=5)
+void dropbear_trace5(const char* format, ...) {
+	va_list param;
+
+	va_start(param, format);
+	dropbear_tracelevel(5, format, param);
+	va_end(param);
+}
+#endif
+#endif
+
 
 /* Connect to a given unix socket. The socket is blocking */
 #if ENABLE_CONNECT_UNIX
@@ -575,9 +599,14 @@ void setnonblocking(int fd) {
 }
 
 void disallow_core() {
-	struct rlimit lim;
-	lim.rlim_cur = lim.rlim_max = 0;
-	setrlimit(RLIMIT_CORE, &lim);
+	struct rlimit lim = {0};
+	if (getrlimit(RLIMIT_CORE, &lim) < 0) {
+		TRACE(("getrlimit(RLIMIT_CORE) failed"));
+	}
+	lim.rlim_cur = 0;
+	if (setrlimit(RLIMIT_CORE, &lim) < 0) {
+		TRACE(("setrlimit(RLIMIT_CORE) failed"));
+	}
 }
 
 /* Returns DROPBEAR_SUCCESS or DROPBEAR_FAILURE, with the result in *val */
@@ -588,7 +617,7 @@ int m_str_to_uint(const char* str, unsigned int *val) {
 	l = strtoul(str, &endp, 10);
 
 	if (endp == str || *endp != '\0') {
-		// parse error
+		/* parse error */
 		return DROPBEAR_FAILURE;
 	}
 
@@ -604,11 +633,11 @@ int m_str_to_uint(const char* str, unsigned int *val) {
 	}
 }
 
-/* Returns malloced path. inpath beginning with '/' is returned as-is,
-otherwise home directory is prepended */
+/* Returns malloced path. inpath beginning with '~/' expanded,
+   otherwise returned as-is */
 char * expand_homedir_path(const char *inpath) {
 	struct passwd *pw = NULL;
-	if (inpath[0] != '/') {
+	if (strncmp(inpath, "~/", 2) == 0) {
 		char *homedir = getenv("HOME");
 
 		if (!homedir) {
@@ -619,9 +648,9 @@ char * expand_homedir_path(const char *inpath) {
 		}
 
 		if (homedir) {
-			int len = strlen(inpath) + strlen(homedir) + 2;
+			int len = strlen(inpath)-2 + strlen(homedir) + 2;
 			char *buf = m_malloc(len);
-			snprintf(buf, len, "%s/%s", homedir, inpath);
+			snprintf(buf, len, "%s/%s", homedir, inpath+2);
 			return buf;
 		}
 	}
@@ -741,4 +770,17 @@ int fd_read_pending(int fd) {
 		}
 		return FD_ISSET(fd, &fds);
 	}
+}
+
+int m_snprintf(char *str, size_t size, const char *format, ...) {
+	va_list param;
+	int ret;
+
+	va_start(param, format);
+	ret = vsnprintf(str, size, format, param);
+	va_end(param);
+	if (ret < 0) {
+		dropbear_exit("snprintf failed");
+	}
+	return ret;
 }

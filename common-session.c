@@ -285,8 +285,7 @@ static void cleanup_buf(buffer **buf) {
 	if (!*buf) {
 		return;
 	}
-	buf_burn(*buf);
-	buf_free(*buf);
+	buf_burn_free(*buf);
 	*buf = NULL;
 }
 
@@ -404,7 +403,7 @@ static void read_session_identification() {
 		dropbear_exit("Incompatible remote version '%s'", ses.remoteident);
 	}
 
-	TRACE(("remoteident: %s", ses.remoteident))
+	DEBUG1(("remoteident: %s", ses.remoteident))
 
 }
 

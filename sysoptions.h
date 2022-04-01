@@ -4,7 +4,7 @@
  *******************************************************************/
 
 #ifndef DROPBEAR_VERSION
-#define DROPBEAR_VERSION "2020.81"
+#define DROPBEAR_VERSION "2022.82"
 #endif
 
 #define LOCAL_IDENT "SSH-2.0-dropbear_" DROPBEAR_VERSION
@@ -131,14 +131,6 @@
 #define DROPBEAR_MD5_HMAC 0
 #endif
 
-/* Twofish counter mode is disabled by default because it 
-has not been tested for interoperability with other SSH implementations.
-If you test it please contact the Dropbear author */
-#ifndef DROPBEAR_TWOFISH_CTR
-#define DROPBEAR_TWOFISH_CTR 0
-#endif
-
-
 #define DROPBEAR_ECC ((DROPBEAR_ECDH) || (DROPBEAR_ECDSA))
 
 /* Debian doesn't define this in system headers */
@@ -165,9 +157,11 @@ If you test it please contact the Dropbear author */
 #endif
 
 /* hashes which will be linked and registered */
-#define DROPBEAR_SHA256 ((DROPBEAR_SHA2_256_HMAC) || (DROPBEAR_ECC_256) \
- 			|| (DROPBEAR_CURVE25519) || (DROPBEAR_DH_GROUP14_SHA256) \
-			|| (DROPBEAR_RSA_SHA256))
+#define DROPBEAR_SHA1 (DROPBEAR_RSA_SHA1 || DROPBEAR_DSS \
+				|| DROPBEAR_SHA1_HMAC || DROPBEAR_SHA1_96_HMAC \
+				|| DROPBEAR_DH_GROUP1 || DROPBEAR_DH_GROUP14_SHA1 )
+/* sha256 is always used for fingerprints and dbrandom */
+#define DROPBEAR_SHA256 1
 #define DROPBEAR_SHA384 (DROPBEAR_ECC_384)
 /* LTC SHA384 depends on SHA512 */
 #define DROPBEAR_SHA512 ((DROPBEAR_SHA2_512_HMAC) || (DROPBEAR_ECC_521) \
@@ -235,8 +229,6 @@ If you test it please contact the Dropbear author */
 
 #define DROPBEAR_AES ((DROPBEAR_AES256) || (DROPBEAR_AES128))
 
-#define DROPBEAR_TWOFISH ((DROPBEAR_TWOFISH256) || (DROPBEAR_TWOFISH128))
-
 #define DROPBEAR_AEAD_MODE ((DROPBEAR_CHACHA20POLY1305) || (DROPBEAR_ENABLE_GCM_MODE))
 
 #define DROPBEAR_CLI_ANYTCPFWD ((DROPBEAR_CLI_REMOTETCPFWD) || (DROPBEAR_CLI_LOCALTCPFWD))
@@ -280,8 +272,7 @@ If you test it please contact the Dropbear author */
 	#error "You must define DROPBEAR_SVR_PUBKEY_AUTH in order to use plugins"
 #endif
 
-#if !(DROPBEAR_AES128 || DROPBEAR_3DES || DROPBEAR_AES256 || DROPBEAR_BLOWFISH \
-      || DROPBEAR_TWOFISH256 || DROPBEAR_TWOFISH128 || DROPBEAR_CHACHA20POLY1305)
+#if !(DROPBEAR_AES128 || DROPBEAR_3DES || DROPBEAR_AES256 || DROPBEAR_CHACHA20POLY1305)
 	#error "At least one encryption algorithm must be enabled. AES128 is recommended."
 #endif
 

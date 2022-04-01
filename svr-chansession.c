@@ -685,8 +685,10 @@ static int sessioncommand(struct Channel *channel, struct ChanSess *chansess,
 		if (issubsys) {
 #if DROPBEAR_SFTPSERVER
 			if ((cmdlen == 4) && strncmp(chansess->cmd, "sftp", 4) == 0) {
+				char *expand_path = expand_homedir_path(SFTPSERVER_PATH);
 				m_free(chansess->cmd);
-				chansess->cmd = m_strdup(SFTPSERVER_PATH);
+				chansess->cmd = m_strdup(expand_path);
+				m_free(expand_path);
 			} else 
 #endif
 			{
@@ -871,9 +873,11 @@ static int ptycommand(struct Channel *channel, struct ChanSess *chansess) {
 			snprintf(hushpath, len, "%s/.hushlogin", ses.authstate.pw_dir);
 
 			if (stat(hushpath, &sb) < 0) {
+				char *expand_path = NULL;
 				/* more than a screenful is stupid IMHO */
 				motdbuf = buf_new(80 * 25);
-				if (buf_readfile(motdbuf, MOTD_FILENAME) == DROPBEAR_SUCCESS) {
+				expand_path = expand_homedir_path(MOTD_FILENAME);
+				if (buf_readfile(motdbuf, expand_path) == DROPBEAR_SUCCESS) {
 					buf_setpos(motdbuf, 0);
 					while (motdbuf->pos != motdbuf->len) {
 						len = motdbuf->len - motdbuf->pos;
@@ -882,7 +886,9 @@ static int ptycommand(struct Channel *channel, struct ChanSess *chansess) {
 						buf_incrpos(motdbuf, len);
 					}
 				}
+				m_free(expand_path);
 				buf_free(motdbuf);
+
 			}
 			m_free(hushpath);
 		}
@@ -1006,7 +1012,11 @@ static void execchild(const void *user_data) {
 	addnewvar("LOGNAME", ses.authstate.pw_name);
 	addnewvar("HOME", ses.authstate.pw_dir);
 	addnewvar("SHELL", get_user_shell());
-	addnewvar("PATH", DEFAULT_PATH);
+	if (getuid() == 0) {
+		addnewvar("PATH", DEFAULT_ROOT_PATH);
+	} else {
+		addnewvar("PATH", DEFAULT_PATH);
+	}
 	if (cp != NULL) {
 		addnewvar("LANG", cp);
 		m_free(cp);
@@ -1030,11 +1040,19 @@ static void execchild(const void *user_data) {
 	if (chansess->original_command) {
 		addnewvar("SSH_ORIGINAL_COMMAND", chansess->original_command);
 	}
+        if (ses.authstate.pubkey_info != NULL) {
+                addnewvar("SSH_PUBKEYINFO", ses.authstate.pubkey_info);
+        }
 
 	/* change directory */
 	if (chdir(ses.authstate.pw_dir) < 0) {
-		dropbear_exit("Error changing directory");
+		int e = errno;
+		if (chdir("/") < 0) {
+			dropbear_exit("chdir(\"/\") failed");
+		}
+		fprintf(stderr, "Failed chdir '%s': %s\n", ses.authstate.pw_dir, strerror(e));
 	}
+
 
 #if DROPBEAR_X11FWD
 	/* set up X11 forwarding if enabled */

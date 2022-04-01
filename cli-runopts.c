@@ -62,6 +62,7 @@ static void printhelp() {
 					"-T    Don't allocate a pty\n"
 					"-N    Don't run a remote command\n"
 					"-f    Run in background after auth\n"
+					"-q    quiet, don't show remote banner\n"
 					"-y    Always accept remote host key if unknown\n"
 					"-y -y Don't perform any remote host key checking (caution)\n"
 					"-s    Request a subsystem (use by external sftp)\n"
@@ -95,7 +96,7 @@ static void printhelp() {
 					"-b    [bind_address][:bind_port]\n"
 					"-V    Version\n"
 #if DEBUG_TRACE
-					"-v    verbose (compiled with DEBUG_TRACE)\n"
+					"-v    verbose (repeat for more verbose)\n"
 #endif
 					,DROPBEAR_VERSION, cli_opts.progname,
 #if DROPBEAR_CLI_PUBKEY_AUTH
@@ -141,6 +142,7 @@ void cli_getopts(int argc, char ** argv) {
 	cli_opts.username = NULL;
 	cli_opts.cmd = NULL;
 	cli_opts.no_cmd = 0;
+	cli_opts.quiet = 0;
 	cli_opts.backgrounded = 0;
 	cli_opts.wantpty = 9; /* 9 means "it hasn't been touched", gets set later */
 	cli_opts.always_accept_key = 0;
@@ -213,6 +215,9 @@ void cli_getopts(int argc, char ** argv) {
 						cli_opts.no_hostkey_check = 1;
 					}
 					cli_opts.always_accept_key = 1;
+					break;
+				case 'q': /* quiet */
+					cli_opts.quiet = 1;
 					break;
 				case 'p': /* remoteport */
 					next = (char**)&cli_opts.remoteport;
@@ -297,7 +302,7 @@ void cli_getopts(int argc, char ** argv) {
 #endif
 #if DEBUG_TRACE
 				case 'v':
-					debug_trace = 1;
+					debug_trace++;
 					break;
 #endif
 				case 'F':
@@ -414,7 +419,7 @@ void cli_getopts(int argc, char ** argv) {
 
 	/* And now a few sanity checks and setup */
 
-#if DROPBEAR_CLI_PROXYCMD                                                                                                                                   
+#if DROPBEAR_CLI_PROXYCMD
 	if (cli_opts.proxycmd) {
 		/* To match the common path of m_freeing it */
 		cli_opts.proxycmd = m_strdup(cli_opts.proxycmd);
@@ -426,14 +431,10 @@ void cli_getopts(int argc, char ** argv) {
 	}
 
 	if (bind_arg) {
-		/* split [host][:port] */
-		char *port = strrchr(bind_arg, ':');
-		if (port) {
-			cli_opts.bind_port = m_strdup(port+1);
-			*port = '\0';
-		}
-		if (strlen(bind_arg) > 0) {
-			cli_opts.bind_address = m_strdup(bind_arg);
+		if (split_address_port(bind_arg,
+			&cli_opts.bind_address, &cli_opts.bind_port)
+				== DROPBEAR_FAILURE) {
+			dropbear_exit("Bad -b argument");
 		}
 	}
 
@@ -477,14 +478,6 @@ void cli_getopts(int argc, char ** argv) {
 	}
 #endif
 
-#if (DROPBEAR_CLI_PUBKEY_AUTH)
-	{
-		char *expand_path = expand_homedir_path(DROPBEAR_DEFAULT_CLI_AUTHKEY);
-		loadidentityfile(expand_path, 0);
-		m_free(expand_path);
-	}
-#endif
-
 	/* The hostname gets set up last, since
 	 * in multi-hop mode it will require knowledge
 	 * of other flags such as -i */
@@ -493,6 +486,17 @@ void cli_getopts(int argc, char ** argv) {
 #else
 	parse_hostname(host_arg);
 #endif
+
+	/* We don't want to include default id_dropbear as a
+	   -i argument for multihop, so handle it later. */
+#if (DROPBEAR_CLI_PUBKEY_AUTH)
+	{
+		char *expand_path = expand_homedir_path(DROPBEAR_DEFAULT_CLI_AUTHKEY);
+		loadidentityfile(expand_path, 0);
+		m_free(expand_path);
+	}
+#endif
+
 }
 
 #if DROPBEAR_CLI_PUBKEY_AUTH
@@ -523,11 +527,11 @@ static void loadidentityfile(const char* filename, int warnfail) {
 static char*
 multihop_passthrough_args() {
 	char *ret;
-	int total;
-	unsigned int len = 0;
+	unsigned int len, total;
 	m_list_elem *iter;
 	/* Fill out -i, -y, -W options that make sense for all
 	 * the intermediate processes */
+	len = 30; /* space for "-q -y -y -W <size>\0" */
 #if DROPBEAR_CLI_PUBKEY_AUTH
 	for (iter = cli_opts.privkeys->first; iter; iter = iter->next)
 	{
@@ -535,44 +539,39 @@ multihop_passthrough_args() {
 		len += 3 + strlen(key->filename);
 	}
 #endif /* DROPBEAR_CLI_PUBKEY_AUTH */
+	if (cli_opts.proxycmd) {
+		/* "-J 'cmd'" */
+		len += 6 + strlen(cli_opts.proxycmd);
+	}
 
-	len += 30; /* space for -W <size>, terminator. */
 	ret = m_malloc(len);
 	total = 0;
 
-	if (cli_opts.no_hostkey_check)
-	{
-		int written = snprintf(ret+total, len-total, "-y -y ");
-		total += written;
-	}
-	else if (cli_opts.always_accept_key)
-	{
-		int written = snprintf(ret+total, len-total, "-y ");
-		total += written;
+	if (cli_opts.quiet) {
+		total += m_snprintf(ret+total, len-total, "-q ");
 	}
 
-	if (opts.recv_window != DEFAULT_RECV_WINDOW)
-	{
-		int written = snprintf(ret+total, len-total, "-W %u ", opts.recv_window);
-		total += written;
+	if (cli_opts.no_hostkey_check) {
+		total += m_snprintf(ret+total, len-total, "-y -y ");
+	} else if (cli_opts.always_accept_key) {
+		total += m_snprintf(ret+total, len-total, "-y ");
+	}
+
+	if (cli_opts.proxycmd) {
+		total += m_snprintf(ret+total, len-total, "-J '%s' ", cli_opts.proxycmd);
+	}
+
+	if (opts.recv_window != DEFAULT_RECV_WINDOW) {
+		total += m_snprintf(ret+total, len-total, "-W %u ", opts.recv_window);
 	}
 
 #if DROPBEAR_CLI_PUBKEY_AUTH
 	for (iter = cli_opts.privkeys->first; iter; iter = iter->next)
 	{
 		sign_key * key = (sign_key*)iter->item;
-		const size_t size = len - total;
-		int written = snprintf(ret+total, size, "-i %s ", key->filename);
-		dropbear_assert((unsigned int)written < size);
-		total += written;
+		total += m_snprintf(ret+total, len-total, "-i %s ", key->filename);
 	}
 #endif /* DROPBEAR_CLI_PUBKEY_AUTH */
-
-	/* if args were passed, total will be not zero, and it will have a space at the end, so remove that */
-	if (total > 0) 
-	{
-		total--;
-	}
 
 	return ret;
 }
@@ -586,6 +585,9 @@ multihop_passthrough_args() {
  * and then the inner dbclient will recursively run:
  *   dbclient -J "dbclient -B madako:22 wrt" madako
  * etc for as many hosts as we want.
+ *
+ * Note that "-J" arguments aren't actually used, instead
+ * below sets cli_opts.proxycmd directly.
  *
  * Ports for hosts can be specified as host/port.
  */
@@ -605,7 +607,7 @@ static void parse_multihop_hostname(const char* orighostarg, const char* argv0) 
 			&& strchr(cli_opts.username, '@')) {
 		unsigned int len = strlen(orighostarg) + strlen(cli_opts.username) + 2;
 		hostbuf = m_malloc(len);
-		snprintf(hostbuf, len, "%s@%s", cli_opts.username, orighostarg);
+		m_snprintf(hostbuf, len, "%s@%s", cli_opts.username, orighostarg);
 	} else {
 		hostbuf = m_strdup(orighostarg);
 	}
@@ -628,19 +630,18 @@ static void parse_multihop_hostname(const char* orighostarg, const char* argv0) 
 		/* Set up the proxycmd */
 		unsigned int cmd_len = 0;
 		char *passthrough_args = multihop_passthrough_args();
-		if (cli_opts.proxycmd) {
-			dropbear_exit("-J can't be used with multihop mode");
-		}
 		if (cli_opts.remoteport == NULL) {
 			cli_opts.remoteport = "22";
 		}
-		cmd_len = strlen(argv0) + strlen(remainder) 
+		cmd_len = strlen(argv0) + strlen(remainder)
 			+ strlen(cli_opts.remotehost) + strlen(cli_opts.remoteport)
 			+ strlen(passthrough_args)
 			+ 30;
-		cli_opts.proxycmd = m_malloc(cmd_len);
-		snprintf(cli_opts.proxycmd, cmd_len, "%s -B %s:%s %s %s", 
-				argv0, cli_opts.remotehost, cli_opts.remoteport, 
+		/* replace proxycmd. old -J arguments have been copied
+		   to passthrough_args */
+		cli_opts.proxycmd = m_realloc(cli_opts.proxycmd, cmd_len);
+		m_snprintf(cli_opts.proxycmd, cmd_len, "%s -B %s:%s %s %s",
+				argv0, cli_opts.remotehost, cli_opts.remoteport,
 				passthrough_args, remainder);
 #ifndef DISABLE_ZLIB
 		/* The stream will be incompressible since it's encrypted. */
