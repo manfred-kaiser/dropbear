@@ -33,13 +33,14 @@
 
 typedef struct runopts {
 
+	int disable_ip_tos;
 #if DROPBEAR_SVR_REMOTETCPFWD || DROPBEAR_CLI_LOCALTCPFWD \
     || DROPBEAR_CLI_REMOTETCPFWD
 	int listen_fwd_all;
 #endif
 	unsigned int recv_window;
-	time_t keepalive_secs; /* Time between sending keepalives. 0 is off */
-	time_t idle_timeout_secs; /* Exit if no traffic is sent/received in this time */
+	long keepalive_secs; /* Time between sending keepalives. 0 is off */
+	long idle_timeout_secs; /* Exit if no traffic is sent/received in this time */
 	int usingsyslog;
 
 #ifndef DISABLE_ZLIB
@@ -106,6 +107,7 @@ typedef struct svr_runopts {
 	int noauthpass;
 	int norootpass;
 	int allowblankpass;
+	int multiauthmethod;
 	unsigned int maxauthtries;
 
 #if DROPBEAR_SVR_REMOTETCPFWD
@@ -128,8 +130,10 @@ typedef struct svr_runopts {
 	char * forced_command;
 
 #if DROPBEAR_PLUGIN 
-        char *pubkey_plugin;
-        char *pubkey_plugin_options;
+	/* malloced */
+	char *pubkey_plugin;
+	/* points into pubkey_plugin */
+	char *pubkey_plugin_options;
 #endif
 
 	int pass_on_env;

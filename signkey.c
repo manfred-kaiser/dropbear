@@ -120,6 +120,7 @@ enum signkey_type signkey_type_from_name(const char* name, unsigned int namelen)
 /* Special case for rsa-sha2-256. This could be generalised if more 
    signature names are added that aren't 1-1 with public key names */
 const char* signature_name_from_type(enum signature_type type, unsigned int *namelen) {
+#if DROPBEAR_RSA
 #if DROPBEAR_RSA_SHA256
 	if (type == DROPBEAR_SIGNATURE_RSA_SHA256) {
 		if (namelen) {
@@ -136,11 +137,13 @@ const char* signature_name_from_type(enum signature_type type, unsigned int *nam
 		return SSH_SIGNKEY_RSA;
 	}
 #endif
+#endif /* DROPBEAR_RSA */
 	return signkey_name_from_type((enum signkey_type)type, namelen);
 }
 
 /* Returns DROPBEAR_SIGNATURE_NONE if none match */
 enum signature_type signature_type_from_name(const char* name, unsigned int namelen) {
+#if DROPBEAR_RSA
 #if DROPBEAR_RSA_SHA256
 	if (namelen == strlen(SSH_SIGNATURE_RSA_SHA256) 
 		&& memcmp(name, SSH_SIGNATURE_RSA_SHA256, namelen) == 0) {
@@ -153,10 +156,11 @@ enum signature_type signature_type_from_name(const char* name, unsigned int name
 		return DROPBEAR_SIGNATURE_RSA_SHA1;
 	}
 #endif
+#endif /* DROPBEAR_RSA */
 	return (enum signature_type)signkey_type_from_name(name, namelen);
 }
 
-/* Returns the signature type from a key type. Must not be called 
+/* Returns the signature type from a key type. Must not be called
    with RSA keytype */
 enum signature_type signature_type_from_signkey(enum signkey_type keytype) {
 #if DROPBEAR_RSA
@@ -167,6 +171,7 @@ enum signature_type signature_type_from_signkey(enum signkey_type keytype) {
 }
 
 enum signkey_type signkey_type_from_signature(enum signature_type sigtype) {
+#if DROPBEAR_RSA
 #if DROPBEAR_RSA_SHA256
 	if (sigtype == DROPBEAR_SIGNATURE_RSA_SHA256) {
 		return DROPBEAR_SIGNKEY_RSA;
@@ -177,6 +182,7 @@ enum signkey_type signkey_type_from_signature(enum signature_type sigtype) {
 		return DROPBEAR_SIGNKEY_RSA;
 	}
 #endif
+#endif /* DROPBEAR_RSA */
 	assert((int)sigtype < (int)DROPBEAR_SIGNKEY_NUM_NAMED);
 	return (enum signkey_type)sigtype;
 }
@@ -688,7 +694,7 @@ int buf_verify(buffer * buf, sign_key *key, enum signature_type expect_sigtype, 
 	if (keytype == DROPBEAR_SIGNKEY_SK_ECDSA_NISTP256) {
 		ecc_key **eck = (ecc_key**)signkey_key_ptr(key, keytype);
 		if (eck && *eck) {
-			return buf_sk_ecdsa_verify(buf, *eck, data_buf, key->sk_app, key->sk_applen);
+			return buf_sk_ecdsa_verify(buf, *eck, data_buf, key->sk_app, key->sk_applen, key->sk_flags_mask);
 		}
 	}
 #endif
@@ -696,7 +702,7 @@ int buf_verify(buffer * buf, sign_key *key, enum signature_type expect_sigtype, 
 	if (keytype == DROPBEAR_SIGNKEY_SK_ED25519) {
 		dropbear_ed25519_key **eck = (dropbear_ed25519_key**)signkey_key_ptr(key, keytype);
 		if (eck && *eck) {
-			return buf_sk_ed25519_verify(buf, *eck, data_buf, key->sk_app, key->sk_applen);
+			return buf_sk_ed25519_verify(buf, *eck, data_buf, key->sk_app, key->sk_applen, key->sk_flags_mask);
 		}
 	}
 #endif

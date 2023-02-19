@@ -81,6 +81,7 @@ static void printhelp(const char * progname) {
 					"-s		Disable password logins\n"
 					"-g		Disable password logins for root\n"
 					"-B		Allow blank password logins\n"
+					"-t		Enable two-factor authentication (both password and public key required)\n"
 #endif
 					"-T		Maximum authentication tries (default %d)\n"
 #if DROPBEAR_SVR_LOCALTCPFWD
@@ -103,6 +104,7 @@ static void printhelp(const char * progname) {
 					"-W <receive_window_buffer> (default %d, larger may be faster, max 10MB)\n"
 					"-K <keepalive>  (0 is never, default %d, in seconds)\n"
 					"-I <idle_timeout>  (0 is never, default %d, in seconds)\n"
+					"-z    disable QoS\n"
 #if DROPBEAR_PLUGIN
                                         "-A <authplugin>[,<options>]\n"
                                         "               Enable external public key auth through <authplugin>\n"
@@ -159,6 +161,7 @@ void svr_getopts(int argc, char ** argv) {
 	svr_opts.noauthpass = 0;
 	svr_opts.norootpass = 0;
 	svr_opts.allowblankpass = 0;
+	svr_opts.multiauthmethod = 0;
 	svr_opts.maxauthtries = MAX_AUTH_TRIES;
 	svr_opts.inetdmode = 0;
 	svr_opts.portcount = 0;
@@ -199,6 +202,7 @@ void svr_getopts(int argc, char ** argv) {
 #if DROPBEAR_SVR_REMOTETCPFWD
 	opts.listen_fwd_all = 0;
 #endif
+	opts.disable_ip_tos = 0;
 
 	for (i = 1; i < (unsigned int)argc; i++) {
 		if (argv[i][0] != '-' || argv[i][1] == '\0')
@@ -297,6 +301,9 @@ void svr_getopts(int argc, char ** argv) {
 				case 'B':
 					svr_opts.allowblankpass = 1;
 					break;
+				case 't':
+					svr_opts.multiauthmethod = 1;
+					break;
 #endif
 				case 'h':
 					printhelp(argv[0]);
@@ -318,6 +325,9 @@ void svr_getopts(int argc, char ** argv) {
 				case 'V':
 					print_version();
 					exit(EXIT_SUCCESS);
+					break;
+				case 'z':
+					opts.disable_ip_tos = 1;
 					break;
 				default:
 					fprintf(stderr, "Invalid option -%c\n", c);
@@ -447,16 +457,20 @@ void svr_getopts(int argc, char ** argv) {
 	}
 #endif
 
+	if (svr_opts.multiauthmethod && svr_opts.noauthpass) {
+		dropbear_exit("-t and -s are incompatible");
+	}
+
 #if DROPBEAR_PLUGIN
-        if (pubkey_plugin) {
-            char *args = strchr(pubkey_plugin, ',');
-            if (args) {
-                *args='\0';
-                ++args;
-            }
-            svr_opts.pubkey_plugin = pubkey_plugin;
-            svr_opts.pubkey_plugin_options = args;
-        }
+	if (pubkey_plugin) {
+		svr_opts.pubkey_plugin = m_strdup(pubkey_plugin);
+		char *args = strchr(svr_opts.pubkey_plugin, ',');
+		if (args) {
+			*args='\0';
+			++args;
+		}
+		svr_opts.pubkey_plugin_options = args;
+	}
 #endif
 }
 
@@ -491,11 +505,11 @@ static void addportandaddress(const char* spec) {
 	svr_opts.portcount++;
 }
 
-static void disablekey(int type) {
+static void disablekey(enum signature_type type) {
 	int i;
 	TRACE(("Disabling key type %d", type))
 	for (i = 0; sigalgs[i].name != NULL; i++) {
-		if (sigalgs[i].val == type) {
+		if ((int)sigalgs[i].val == (int)type) {
 			sigalgs[i].usable = 0;
 			break;
 		}
@@ -610,7 +624,8 @@ void load_all_hostkeys() {
 
 #if DROPBEAR_RSA
 	if (!svr_opts.delay_hostkey && !svr_opts.hostkey->rsakey) {
-		disablekey(DROPBEAR_SIGNKEY_RSA);
+		disablekey(DROPBEAR_SIGNATURE_RSA_SHA256);
+		disablekey(DROPBEAR_SIGNATURE_RSA_SHA1);
 	} else {
 		any_keys = 1;
 	}
@@ -618,7 +633,7 @@ void load_all_hostkeys() {
 
 #if DROPBEAR_DSS
 	if (!svr_opts.delay_hostkey && !svr_opts.hostkey->dsskey) {
-		disablekey(DROPBEAR_SIGNKEY_DSS);
+		disablekey(DROPBEAR_SIGNATURE_DSS);
 	} else {
 		any_keys = 1;
 	}
@@ -652,35 +667,35 @@ void load_all_hostkeys() {
 #if DROPBEAR_ECC_256
 	if (!svr_opts.hostkey->ecckey256
 		&& (!svr_opts.delay_hostkey || loaded_any_ecdsa || ECDSA_DEFAULT_SIZE != 256 )) {
-		disablekey(DROPBEAR_SIGNKEY_ECDSA_NISTP256);
+		disablekey(DROPBEAR_SIGNATURE_ECDSA_NISTP256);
 	}
 #endif
 #if DROPBEAR_ECC_384
 	if (!svr_opts.hostkey->ecckey384
 		&& (!svr_opts.delay_hostkey || loaded_any_ecdsa || ECDSA_DEFAULT_SIZE != 384 )) {
-		disablekey(DROPBEAR_SIGNKEY_ECDSA_NISTP384);
+		disablekey(DROPBEAR_SIGNATURE_ECDSA_NISTP384);
 	}
 #endif
 #if DROPBEAR_ECC_521
 	if (!svr_opts.hostkey->ecckey521
 		&& (!svr_opts.delay_hostkey || loaded_any_ecdsa || ECDSA_DEFAULT_SIZE != 521 )) {
-		disablekey(DROPBEAR_SIGNKEY_ECDSA_NISTP521);
+		disablekey(DROPBEAR_SIGNATURE_ECDSA_NISTP521);
 	}
 #endif
 #endif /* DROPBEAR_ECDSA */
 
 #if DROPBEAR_ED25519
 	if (!svr_opts.delay_hostkey && !svr_opts.hostkey->ed25519key) {
-		disablekey(DROPBEAR_SIGNKEY_ED25519);
+		disablekey(DROPBEAR_SIGNATURE_ED25519);
 	} else {
 		any_keys = 1;
 	}
 #endif
 #if DROPBEAR_SK_ECDSA
-	disablekey(DROPBEAR_SIGNKEY_SK_ECDSA_NISTP256);
+	disablekey(DROPBEAR_SIGNATURE_SK_ECDSA_NISTP256);
 #endif 
 #if DROPBEAR_SK_ED25519
-	disablekey(DROPBEAR_SIGNKEY_SK_ED25519);
+	disablekey(DROPBEAR_SIGNATURE_SK_ED25519);
 #endif
 
 	if (!any_keys) {

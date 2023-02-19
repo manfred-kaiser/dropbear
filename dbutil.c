@@ -442,7 +442,7 @@ void printhex(const char * label, const unsigned char * buf, int len) {
 	}
 }
 
-void printmpint(const char *label, mp_int *mp) {
+void printmpint(const char *label, const mp_int *mp) {
 	buffer *buf = buf_new(1000);
 	buf_putmpint(buf, mp);
 	fprintf(stderr, "%d bits ", mp_count_bits(mp));
@@ -724,7 +724,7 @@ void gettime_wrapper(struct timespec *now) {
 	/* Fallback for everything else - this will sometimes go backwards */
 	gettimeofday(&tv, NULL);
 	now->tv_sec = tv.tv_sec;
-	now->tv_nsec = 1000*tv.tv_usec;
+	now->tv_nsec = 1000*(long)tv.tv_usec;
 }
 
 /* second-resolution monotonic timestamp */

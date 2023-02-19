@@ -1,14 +1,22 @@
 /*******************************************************************
- * You shouldn't edit this file unless you know you need to. 
+ * You shouldn't edit this file unless you know you need to.
  * This file is only included from options.h
  *******************************************************************/
 
 #ifndef DROPBEAR_VERSION
-#define DROPBEAR_VERSION "2022.82"
+#define DROPBEAR_VERSION "2022.83"
 #endif
 
 #define LOCAL_IDENT "SSH-2.0-dropbear_" DROPBEAR_VERSION
 #define PROGNAME "dropbear"
+
+#ifndef DROPBEAR_CLIENT
+#define DROPBEAR_CLIENT 0
+#endif
+
+#ifndef DROPBEAR_SERVER
+#define DROPBEAR_SERVER 0
+#endif
 
 /* Spec recommends after one hour or 1 gigabyte of data. One hour
  * is a bit too verbose, so we try 8 hours */
@@ -79,6 +87,15 @@
 
 #define _PATH_CP "/bin/cp"
 
+/* Default contents of /etc/shells if system getusershell() doesn't exist.
+ * Paths taken from getusershell(3) manpage. These can be customised
+ * on other platforms. One the commandline for CFLAGS it would look like eg
+  -DCOMPAT_USER_SHELLS='"/bin/sh","/apps/bin/sh","/data/bin/zsh"'
+ */
+#ifndef COMPAT_USER_SHELLS
+#define COMPAT_USER_SHELLS "/bin/sh","/bin/csh"
+#endif
+
 #define DROPBEAR_ESCAPE_CHAR '~'
 
 /* success/failure defines */
@@ -102,7 +119,6 @@
 
 #define SHA1_HASH_SIZE 20
 #define SHA256_HASH_SIZE 32
-#define MD5_HASH_SIZE 16
 #define MAX_HASH_SIZE 64 /* sha512 */
 
 #if DROPBEAR_CHACHA20POLY1305
@@ -125,16 +141,11 @@
 #define DROPBEAR_SHA2_512_HMAC 0
 #endif
 
-/* might be needed for compatibility with very old implementations */
-#ifndef DROPBEAR_MD5_HMAC
-#define DROPBEAR_MD5_HMAC 0
-#endif
-
 #define DROPBEAR_ECC ((DROPBEAR_ECDH) || (DROPBEAR_ECDSA))
 
 /* Debian doesn't define this in system headers */
 #if !defined(LTM_DESC) && (DROPBEAR_ECC)
-#define LTM_DESC 
+#define LTM_DESC
 #endif
 
 #define DROPBEAR_ECC_256 (DROPBEAR_ECC)
@@ -148,11 +159,17 @@
  * signing operations slightly slower. */
 #define DROPBEAR_RSA_BLINDING 1
 
-#ifndef DROPBEAR_RSA_SHA1
-#define DROPBEAR_RSA_SHA1 DROPBEAR_RSA
-#endif
 #ifndef DROPBEAR_RSA_SHA256
 #define DROPBEAR_RSA_SHA256 DROPBEAR_RSA
+#endif
+
+/* Miller-Rabin primality testing is sufficient for RSA but not DSS.
+ * It's a compile-time setting for libtommath, we can get a speedup
+ * for key generation if DSS is disabled.
+ * https://github.com/mkj/dropbear/issues/174#issuecomment-1267374858
+ */
+#if !DROPBEAR_DSS
+#define LTM_USE_ONLY_MR 1
 #endif
 
 /* hashes which will be linked and registered */
@@ -166,11 +183,17 @@
 #define DROPBEAR_SHA512 ((DROPBEAR_SHA2_512_HMAC) || (DROPBEAR_ECC_521) \
 			|| (DROPBEAR_SHA384) || (DROPBEAR_DH_GROUP16) \
 			|| (DROPBEAR_ED25519))
-#define DROPBEAR_MD5 (DROPBEAR_MD5_HMAC)
 
 #define DROPBEAR_DH_GROUP14 ((DROPBEAR_DH_GROUP14_SHA256) || (DROPBEAR_DH_GROUP14_SHA1))
 
 #define DROPBEAR_NORMAL_DH ((DROPBEAR_DH_GROUP1) || (DROPBEAR_DH_GROUP14) || (DROPBEAR_DH_GROUP16))
+
+#ifndef DROPBEAR_SK_ECDSA
+#define DROPBEAR_SK_ECDSA DROPBEAR_SK_KEYS
+#endif
+#ifndef DROPBEAR_SK_ED25519
+#define DROPBEAR_SK_ED25519 DROPBEAR_SK_KEYS
+#endif
 
 /* Dropbear only uses server-sig-algs, only needed if we have rsa-sha256 pubkey auth */
 #define DROPBEAR_EXT_INFO ((DROPBEAR_RSA_SHA256) \
@@ -356,5 +379,20 @@
 #define DROPBEAR_MSAN 0
 #endif
 
+#ifndef DEBUG_DSS_VERIFY
+#define DEBUG_DSS_VERIFY 0
+#endif
+
+#ifndef DROPBEAR_MULTI
+#define DROPBEAR_MULTI 0
+#endif
+
+/* Fuzzing expects all key types to be enabled */
+#if DROPBEAR_FUZZ
+#if defined(DROPBEAR_DSS)
+#undef DROPBEAR_DSS
+#endif
+#define DROPBEAR_DSS 1
+#endif
 
 /* no include guard for this file */
