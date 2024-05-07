@@ -71,10 +71,13 @@ void common_session_init(int sock_in, int sock_out) {
 #if !DROPBEAR_SVR_MULTIUSER
 	/* A sanity check to prevent an accidental configuration option
 	   leaving multiuser systems exposed */
-	errno = 0;
-	getuid();
-	if (errno != ENOSYS) {
-		dropbear_exit("Non-multiuser Dropbear requires a non-multiuser kernel");
+	{
+		int ret;
+		errno = 0;
+		ret = getgroups(0, NULL);
+		if (!(ret == -1 && errno == ENOSYS)) {
+			dropbear_exit("Non-multiuser Dropbear requires a non-multiuser kernel");
+		}
 	}
 #endif
 
@@ -650,10 +653,16 @@ void fill_passwd(const char* username) {
 	{
 		char *passwd_crypt = pw->pw_passwd;
 #ifdef HAVE_SHADOW_H
-		/* get the shadow password if possible */
-		struct spwd *spasswd = getspnam(ses.authstate.pw_name);
-		if (spasswd && spasswd->sp_pwdp) {
-			passwd_crypt = spasswd->sp_pwdp;
+		/* "x" for the passwd crypt indicates shadow should be used */
+		if (pw->pw_passwd && strcmp(pw->pw_passwd, "x") == 0) {
+			/* get the shadow password */
+			struct spwd *spasswd = getspnam(ses.authstate.pw_name);
+			if (spasswd && spasswd->sp_pwdp) {
+				passwd_crypt = spasswd->sp_pwdp;
+			} else {
+				/* Fail if missing in /etc/shadow */
+				passwd_crypt = "!!";
+			}
 		}
 #endif
 		if (!passwd_crypt) {

@@ -61,11 +61,26 @@
 #include "dbrandom.h"
 #include "gensignkey.h"
 
+#if DROPBEAR_ED25519
+#define DEFAULT_KEY_TYPE_NAME "ed25519"
+#elif DROPBEAR_RSA
+/* Different to the sigalgs list because negotiated hostkeys have fallbacks for compatibility,
+ * whereas a generated authkey doesn't, so RSA needs to be higher than ECDSA */
+#define DEFAULT_KEY_TYPE_NAME "rsa"
+#elif DROPBEAR_ECDSA
+#define DEFAULT_KEY_TYPE_NAME "ecdsa"
+#elif DROPBEAR_DSS
+#define DEFAULT_KEY_TYPE_NAME "dss"
+#endif
+
 static void printhelp(char * progname);
 
-
-static void printpubkey(sign_key * key, int keytype);
-static int printpubfile(const char* filename);
+static void printpubkey(sign_key * key, int keytype, const char * comment, int create_pub_file, const char * filename);
+/* Print a public key and fingerprint to stdout.
+ * Used for "dropbearkey -y" command but also after generation of a new key.
+ * For the new key pair the create_pub_file will be TRUE and the pub key will be saved to a .pub file.
+*/
+static int printpubfile(const char* filename, const char * comment, int create_pub_file);
 
 /* Print a help message */
 static void printhelp(char * progname) {
@@ -107,6 +122,7 @@ static void printhelp(char * progname) {
 					"           Ed25519 has a fixed size of 256 bits\n"
 #endif
 					"-y		Just print the publickey and fingerprint for the\n		private key in <filename>.\n"
+					"-C		Specify the key comment (email).\n"
 #if DEBUG_TRACE
 					"-v		verbose\n"
 #endif
@@ -157,9 +173,10 @@ int main(int argc, char ** argv) {
 	char ** next = NULL;
 	char * filename = NULL;
 	enum signkey_type keytype = DROPBEAR_SIGNKEY_NONE;
-	char * typetext = NULL;
+	char * typetext = DEFAULT_KEY_TYPE_NAME;
 	char * sizetext = NULL;
 	char * passphrase = NULL;
+	char * comment = NULL;
 	unsigned int bits = 0, genbits;
 	int printpub = 0;
 
@@ -187,6 +204,9 @@ int main(int argc, char ** argv) {
 					break;
 				case 's':
 					next = &sizetext;
+					break;
+				case 'C':
+					next = &comment;
 					break;
 				case 'y':
 					printpub = 1;
@@ -221,15 +241,8 @@ int main(int argc, char ** argv) {
 	}
 
 	if (printpub) {
-		int ret = printpubfile(filename);
+		int ret = printpubfile(filename, NULL, 0);
 		exit(ret);
-	}
-
-	/* check/parse args */
-	if (!typetext) {
-		fprintf(stderr, "Must specify key type\n");
-		printhelp(argv[0]);
-		exit(EXIT_FAILURE);
 	}
 
 #if DROPBEAR_RSA
@@ -284,13 +297,13 @@ int main(int argc, char ** argv) {
 		dropbear_exit("Failed to generate key.\n");
 	}
 
-	printpubfile(filename);
+	printpubfile(filename, comment, 1);
 
 	return EXIT_SUCCESS;
 }
 #endif
 
-static int printpubfile(const char* filename) {
+static int printpubfile(const char* filename, const char* comment, int create_pub_file) {
 
 	buffer *buf = NULL;
 	sign_key *key = NULL;
@@ -316,7 +329,7 @@ static int printpubfile(const char* filename) {
 		goto out;
 	}
 
-	printpubkey(key, keytype);
+	printpubkey(key, keytype, comment, create_pub_file, filename);
 
 	err = DROPBEAR_SUCCESS;
 
@@ -330,7 +343,7 @@ out:
 	return err;
 }
 
-static void printpubkey(sign_key * key, int keytype) {
+static void printpubkey(sign_key * key, int keytype, const char * comment, int create_pub_file, const char * filename) {
 
 	buffer * buf = NULL;
 	unsigned char base64key[MAX_PUBKEY_SIZE*2];
@@ -342,6 +355,31 @@ static void printpubkey(sign_key * key, int keytype) {
 	struct passwd * pw = NULL;
 	char * username = NULL;
 	char hostname[100];
+	char * filename_pub = NULL;
+	FILE *pubkey_file = NULL;
+
+	if (create_pub_file) {
+		int pubkey_fd = -1;
+		int filename_pub_len = 0;
+		filename_pub_len = strlen(filename) + 5;
+		filename_pub = m_malloc(filename_pub_len);
+		snprintf(filename_pub, filename_pub_len, "%s.pub", filename);
+
+		/* open() to use O_EXCL, then use a FILE* for fprintf().
+		 * dprintf() is only posix2008 onwards */
+		pubkey_fd = open(filename_pub, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+		if (pubkey_fd >= 0) {
+			/* Convert the fd to a FILE*. The underlying FD is closed
+			 * by later fclose() */
+			pubkey_file = fdopen(pubkey_fd, "w");
+			if (!pubkey_file) {
+				m_close(pubkey_fd);
+			}
+		}
+		if (!pubkey_file) {
+			dropbear_log(LOG_ERR, "Save public key to %s failed: %s", filename_pub, strerror(errno));
+		}
+	}
 
 	buf = buf_new(MAX_PUBKEY_SIZE);
 	buf_put_pub_key(buf, key, keytype);
@@ -358,21 +396,45 @@ static void printpubkey(sign_key * key, int keytype) {
 
 	typestring = signkey_name_from_type(keytype, NULL);
 
-	fp = sign_key_fingerprint(buf_getptr(buf, len), len);
+	printf("Public key portion is:\n");
 
-	/* a user@host comment is informative */
-	username = "";
-	pw = getpwuid(getuid());
-	if (pw) {
-		username = pw->pw_name;
+	if (comment) {
+		printf("%s %s %s\n",
+				typestring, base64key, comment);
+		if (pubkey_file) {
+			fprintf(pubkey_file, "%s %s %s\n",
+					typestring, base64key, comment);
+		}
+	} else {
+		/* a user@host comment is informative */
+		username = "";
+		pw = getpwuid(getuid());
+		if (pw) {
+			username = pw->pw_name;
+		}
+
+		gethostname(hostname, sizeof(hostname));
+		hostname[sizeof(hostname) - 1] = '\0';
+
+		printf("%s %s %s@%s\n",
+				typestring, base64key, username, hostname);
+		if (pubkey_file) {
+			fprintf(pubkey_file, "%s %s %s@%s\n",
+					typestring, base64key, username, hostname);
+		}
 	}
 
-	gethostname(hostname, sizeof(hostname));
-	hostname[sizeof(hostname)-1] = '\0';
-
-	printf("Public key portion is:\n%s %s %s@%s\nFingerprint: %s\n",
-			typestring, base64key, username, hostname, fp);
+	fp = sign_key_fingerprint(buf_getptr(buf, len), len);
+	printf("Fingerprint: %s\n", fp);
 
 	m_free(fp);
 	buf_free(buf);
+
+	if (pubkey_file) {
+		if (fsync(fileno(pubkey_file)) != 0) {
+			dropbear_log(LOG_ERR, "fsync of %s failed: %s", filename_pub, strerror(errno));
+		}
+		fclose(pubkey_file);
+	}
+	m_free(filename_pub);
 }

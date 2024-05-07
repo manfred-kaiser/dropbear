@@ -85,7 +85,7 @@ static void printhelp(const char * progname) {
 					"-t		Enable two-factor authentication (both password and public key required)\n"
 #endif
 					"-T		Maximum authentication tries (default %d)\n"
-#if DROPBEAR_SVR_LOCALTCPFWD
+#if DROPBEAR_SVR_LOCALANYFWD
 					"-j		Disable local port forwarding\n"
 #endif
 #if DROPBEAR_SVR_REMOTETCPFWD
@@ -173,7 +173,7 @@ void svr_getopts(int argc, char ** argv) {
 	svr_opts.hostkey = NULL;
 	svr_opts.delay_hostkey = 0;
 	svr_opts.pidfile = expand_homedir_path(DROPBEAR_PIDFILE);
-#if DROPBEAR_SVR_LOCALTCPFWD
+#if DROPBEAR_SVR_LOCALANYFWD
 	svr_opts.nolocaltcp = 0;
 #endif
 #if DROPBEAR_SVR_REMOTETCPFWD
@@ -240,7 +240,7 @@ void svr_getopts(int argc, char ** argv) {
 					svr_opts.pass_on_env = 1;
 					break;
 
-#if DROPBEAR_SVR_LOCALTCPFWD
+#if DROPBEAR_SVR_LOCALANYFWD
 				case 'j':
 					svr_opts.nolocaltcp = 1;
 					break;
@@ -443,18 +443,6 @@ void svr_getopts(int argc, char ** argv) {
 		}
 	}
 
-#if INETD_MODE
-	if (svr_opts.inetdmode && (
-		opts.usingsyslog == 0
-#if DEBUG_TRACE
-		|| debug_trace
-#endif
-		)) {
-		/* log output goes to stderr which would get sent over the inetd network socket */
-		dropbear_exit("Dropbear inetd mode is incompatible with debug -v or non-syslog");
-	}
-#endif
-
 	if (svr_opts.multiauthmethod && svr_opts.noauthpass) {
 		dropbear_exit("-t and -s are incompatible");
 	}
@@ -622,8 +610,12 @@ void load_all_hostkeys() {
 
 #if DROPBEAR_RSA
 	if (!svr_opts.delay_hostkey && !svr_opts.hostkey->rsakey) {
+#if DROPBEAR_RSA_SHA256
 		disablekey(DROPBEAR_SIGNATURE_RSA_SHA256);
+#endif
+#if DROPBEAR_RSA_SHA1
 		disablekey(DROPBEAR_SIGNATURE_RSA_SHA1);
+#endif
 	} else {
 		any_keys = 1;
 	}

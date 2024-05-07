@@ -76,6 +76,9 @@ static const struct ChanType *svr_chantypes[] = {
 #if DROPBEAR_SVR_LOCALTCPFWD
 	&svr_chan_tcpdirect,
 #endif
+#if DROPBEAR_SVR_LOCALSTREAMFWD
+	&svr_chan_streamlocal,
+#endif
 	NULL /* Null termination is mandatory. */
 };
 
@@ -370,6 +373,9 @@ static void svr_algos_initialise(void) {
 			algo->usable = 0;
 		}
 #endif
+		if (strcmp(algo->name, SSH_STRICT_KEX_C) == 0) {
+			algo->usable = 0;
+		}
 	}
 }
 
